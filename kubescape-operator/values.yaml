@@ -1,0 +1,41 @@
+kubescape-operator:
+  enabled: true
+
+  clusterName: k8s.ba1.exchange.neor.space
+  ksNamespace: kubescape-operator
+
+  account: ""
+  server: api.armosec.io
+
+  triggerNewImageScan: true
+
+  persistence:
+    storageClass: topolvm-provisioner
+    size:
+      backingStorage: 5Gi
+      kubevuln: 2Gi
+
+  global:
+    networkPolicy:
+      enabled: false
+
+  continuousScanning:
+    matchingRules:
+      namespaces:
+      - '*'
+
+  kubescape:
+    submit: true
+
+    serviceMonitor:
+      enabled: true
+      namespace: kube-prometheus-stack
+
+  kollector:
+    replicaCount: 1
+
+  gateway:
+    replicaCount: 1
+
+  otelCollector:
+    replicaCount: 0

@@ -1,0 +1,10 @@
+apiVersion: v2
+name: "kong-ba1"
+description: "An umbrella chart for the kong ingress controller"
+type: application
+version: 0.1.0
+appVersion: 2.20.1
+dependencies:
+  - name: kong
+    version: 2.20.1
+    repository: "https://charts.konghq.com"

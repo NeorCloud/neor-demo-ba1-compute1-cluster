@@ -1,0 +1,9 @@
+apiVersion: v2
+name: eck
+description: Elasticsearch Operator
+version: 0.1.0
+type: application
+dependencies:
+  - name: eck-operator
+    version: 2.10.0
+    repository: https://helm.elastic.co

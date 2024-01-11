@@ -1,0 +1,10 @@
+apiVersion: v2
+name: kubescape-operator
+description: An umbrella chart for installing kubescape-operator
+type: application
+version: 0.1.0
+dependencies:
+  - name: kubescape-operator
+    version: 1.16.x
+    repository: https://kubescape.github.io/helm-charts/
+    condition: kubescape-operator.enabled

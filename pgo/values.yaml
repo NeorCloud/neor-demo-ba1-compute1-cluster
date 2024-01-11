@@ -1,0 +1,4 @@
+pgo:
+  singleNamespace: false
+  controllerImages:
+    cluster: docker.io/crunchydata/postgres-operator:ubi8-5.5.0-0

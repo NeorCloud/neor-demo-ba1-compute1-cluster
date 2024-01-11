@@ -1,0 +1,130 @@
+kibanaIngress:
+  enabled: false
+  
+elasticsearchIngress:
+  enabled: false
+
+eck-stack:
+  eck-kibana:
+    enabled: false
+
+  eck-elasticsearch:
+    enabled: false
+
+  eck-beats:
+    enabled: true
+    fullNameOverride: ba1-compute1-filebeat
+    annotations:
+      eck.k8s.elastic.co/license: basic
+    spec:
+      type: filebeat
+      config:
+        output.elasticsearch:
+          # Array of hosts to connect to.
+          hosts: ["https://logs-es.exchange.neor.space:443"]
+
+          # Protocol - either `http` (default) or `https`.
+          protocol: "https"
+
+          # Authentication credentials - either API key or username/password.
+          #api_key: "id:api_key"
+          username: ""
+          password: "samplePass"
+          ssl.verification_mode: "none"
+        processors:
+        - add_host_metadata: {}
+        - add_cloud_metadata: {}
+        filebeat:
+          autodiscover:
+            providers:
+            - node: ${NODE_NAME}
+              type: kubernetes
+              hints:
+                enabled: true
+                default_config:
+                  type: container
+                  paths:
+                  - /var/log/containers/*${data.kubernetes.container.id}.log
+      daemonSet:
+        podTemplate:
+          spec:
+            serviceAccount: logs-stack-filebeat
+            automountServiceAccountToken: true
+            terminationGracePeriodSeconds: 30
+            dnsPolicy: ClusterFirstWithHostNet
+            hostNetwork: true # Allows to provide richer host metadata
+            priorityClassName: system-node-critical
+            containers:
+            - name: filebeat
+              resources:
+                limits:
+                  memory: 500Mi
+                  cpu: 500m
+                requests:
+                  memory: 100Mi
+                  cpu: 100m
+              securityContext:
+                runAsUser: 0
+              volumeMounts:
+              - name: varlogcontainers
+                mountPath: /var/log/containers
+              - name: varlogpods
+                mountPath: /var/log/pods
+              - name: varlibdockercontainers
+                mountPath: /var/lib/docker/containers
+              env:
+                - name: NODE_NAME
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: spec.nodeName
+            volumes:
+            - name: varlogcontainers
+              hostPath:
+                path: /var/log/containers
+            - name: varlogpods
+              hostPath:
+                path: /var/log/pods
+            - name: varlibdockercontainers
+              hostPath:
+                path: /var/lib/docker/containers
+    serviceAccount:
+      name: logs-stack-filebeat  
+    clusterRole:
+      name: logs-stack-filebeat-autodiscover
+      rules:
+      - apiGroups:
+        - ""
+        resources:
+        - nodes
+        - namespaces
+        - events
+        - pods
+        verbs:
+        - get
+        - list
+        - watch
+      - apiGroups: ["apps"]
+        resources:
+        - replicasets
+        verbs:
+        - get
+        - list
+        - watch
+      - apiGroups: ["batch"]
+        resources:
+        - jobs
+        verbs:
+        - get
+        - list
+        - watch
+    clusterRoleBinding:
+      name: logs-stack-filebeat-autodiscover-binding
+      subjects:
+      - kind: ServiceAccount
+        name: logs-stack-filebeat
+        namespace: logs-collection
+      roleRef:
+        kind: ClusterRole
+        name: logs-stack-filebeat-autodiscover
+        apiGroup: rbac.authorization.k8s.io
+      

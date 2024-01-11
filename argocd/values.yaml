@@ -1,0 +1,194 @@
+argo-cd:
+  configs:
+    params:
+      server.insecure: true
+    cm:
+      url: https://argocd.ba1.exchange.neor.space
+      exec.enabled: true
+      params:
+        server.enable.gzip: true
+      oidc.config: |
+        name: NeorSSO
+        issuer: https://sso.exchange.neor.space/realms/observability
+        clientID: argocd
+        clientSecret: $oidc.keycloak.clientSecret
+        requestedScopes: ["openid", "profile", "email", "groups"]
+      accounts.githubPipeline: apiKey
+      resource.customizations: |
+        # Update cronjobs health check to respect failing jobs
+        batch/CronJob:
+          health.lua.useOpenLibs: true
+          health.lua: |
+            hs = {}
+            -- Extract lastScheduleTime and lastSuccessfulTime and convert to time objects
+            lastScheduleTime = nil
+            lastSuccessfulTime = nil
+            if obj.status.lastScheduleTime ~= nil then
+              local year, month, day, hour, min, sec = string.match(obj.status.lastScheduleTime, "(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)Z")
+              lastScheduleTime = os.time({year=year, month=month, day=day, hour=hour, min=min, sec=sec})
+            end
+            if obj.status.lastSuccessfulTime ~= nil then
+              local year, month, day, hour, min, sec = string.match(obj.status.lastSuccessfulTime, "(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)Z")
+              lastSuccessfulTime = os.time({year=year, month=month, day=day, hour=hour, min=min, sec=sec})
+            end
+            -- CronJobs are progressing if they have any object in the "active" state
+            if obj.status.active ~= nil and #obj.status.active > 0 then
+              hs.status = "Progressing"
+              hs.message = "CronJob has active jobs"
+              return hs
+            -- CronJobs are healthy if they don't have lastScheduleTime
+            elseif lastScheduleTime == nil then
+              hs.status = "Healthy"
+              hs.message = "CronJob has never run"
+              return hs
+            -- CronJobs are healthy if they have lastScheduleTime and lastSuccessfulTime and lastScheduleTime < lastSuccessfulTime
+            elseif lastSuccessfulTime ~= nil and lastScheduleTime < lastSuccessfulTime then
+              hs.status = "Healthy"
+              hs.message = "CronJob has run successfully"
+              return hs
+            else
+              hs.status = "Degraded"
+              hs.message = "CronJob has not run successfully"
+            end
+            return hs
+    rbac:
+      policy.csv: |
+        p, role:readonly, applications, get, */*, allow
+        p, role:readonly, certificates, get, *, allow
+        p, role:readonly, clusters, get, *, allow
+        p, role:readonly, repositories, get, *, allow
+        p, role:readonly, projects, get, *, allow
+        p, role:readonly, accounts, get, *, allow
+        p, role:readonly, gpgkeys, get, *, allow
+        p, role:readonly, logs, get, */*, allow
+
+        p, role:admin, applications, create, */*, allow
+        p, role:admin, applications, update, */*, allow
+        p, role:admin, applications, delete, */*, allow
+        p, role:admin, applications, sync, */*, allow
+        p, role:admin, applications, override, */*, allow
+        p, role:admin, applications, action/*, */*, allow
+        p, role:admin, applicationsets, get, */*, allow
+        p, role:admin, applicationsets, create, */*, allow
+        p, role:admin, applicationsets, update, */*, allow
+        p, role:admin, applicationsets, delete, */*, allow
+        p, role:admin, certificates, create, *, allow
+        p, role:admin, certificates, update, *, allow
+        p, role:admin, certificates, delete, *, allow
+        p, role:admin, clusters, create, *, allow
+        p, role:admin, clusters, update, *, allow
+        p, role:admin, clusters, delete, *, allow
+        p, role:admin, repositories, create, *, allow
+        p, role:admin, repositories, update, *, allow
+        p, role:admin, repositories, delete, *, allow
+        p, role:admin, projects, create, *, allow
+        p, role:admin, projects, update, *, allow
+        p, role:admin, projects, delete, *, allow
+        p, role:admin, accounts, update, *, allow
+        p, role:admin, gpgkeys, create, *, allow
+        p, role:admin, gpgkeys, delete, *, allow
+        p, role:admin, exec, create, */*, allow
+
+        p, role:api-cicd, applications, get, */*, allow
+        p, role:api-cicd, applications, sync, */*, allow
+        p, role:api-cicd, applications, action/batch/CronJob/create-job, */*, allow
+        p, role:api-cicd, applicationsets, get, */*, allow
+        p, role:api-cicd, applicationsets, create, */*, allow
+
+        p, role:dev-admin, applications, *, exhchange*/*, allow
+        p, role:dev-admin, applicationsets, *, exhchange*/*, allow
+        p, role:dev-admin, repositories, *, exhchange*/*, allow 
+        p, role:dev-admin, projects, *, exhchange*, allow
+        p, role:dev-admin, accounts, get, exhchange*, allow
+        p, role:dev-admin, exec, create, exhchange*/*, allow
+
+        p, role:devs, applications, get, exhchange*/*, allow
+        p, role:devs, applications, sync, exhchange*/*, allow
+        p, role:devs, applications, action/batch/CronJob/create-job, exhchange*/*, allow
+        p, role:devs, applicationsets, get, exhchange*/*, allow
+        p, role:devs, certificates, get, exhchange*/*, allow
+        p, role:devs, clusters, get, exhchange*/*, allow
+        p, role:devs, repositories, get, exhchange*/*, allow
+        p, role:devs, projects, get, exhchange*/*, allow
+        p, role:devs, logs, get, exhchange*/*, allow
+        p, role:devs, applications, *, exhchange*/*, allow
+
+        g, role:admin, role:readonly
+        g, admin, role:admin
+        g, demo, role:readonly
+        g, SuperAdmins, role:admin
+        g, Developers, role:devs
+        g, Admins, role:dev-admin
+        g, githubPipeline, role:api-cicd
+
+
+  server:
+    replicas: 2
+    ingress:
+      # -- Enable an ingress resource for the Argo CD server
+      enabled: true
+      # -- Additional ingress annotations
+      annotations:
+        konghq.com/protocols: https
+        cert-manager.io/cluster-issuer: letsencrypt-prd
+        
+      # -- Additional ingress labels
+      labels: {}
+      # -- Defines which ingress controller will implement the resource
+      # -- If empty, if any ingress controller is marked as default, it will be used
+      ingressClassName: ""
+
+      hosts:
+      - argocd.ba1.exchange.neor.space
+
+      paths:
+      - /
+      pathType: ImplementationSpecific
+      # -- Additional ingress paths
+      extraPaths: []
+      # - path: /*
+      #   pathType: Prefix
+      #   backend:
+      #     service:
+      #       name: ssl-redirect
+      #       port:
+      #         name: use-annotation
+
+      # -- Ingress TLS configuration
+      tls:
+      - secretName: argocd-tls
+        hosts:
+          - argocd.ba1.exchange.neor.space
+
+      # -- Uses `server.service.servicePortHttps` instead `server.service.servicePortHttp`
+      https: false
+
+  global:
+    env:
+      - name: HTTP_PROXY
+        value: http://msf.alefbyte.com:58889
+      - name: HTTPS_PROXY
+        value: http://msf.alefbyte.com:58889
+      - name: http_proxy
+        value: http://msf.alefbyte.com:58889
+      - name: https_proxy
+        value: http://msf.alefbyte.com:58889
+      - name: NO_PROXY
+        value: argocd-repo-server,argocd-application-controller,argocd-metrics,argocd-server,argocd-server-metrics,argocd-redis,argocd-redis-ha-haproxy,argocd-dex-server,localhost,10.0.0.0/8,*.neor.space
+  
+  redis-ha:
+    enabled: true
+    image:
+      repository: docker.io/redis
+    haproxy:
+      image:
+        repository: docker.io/haproxy
+  
+  controller:
+    replicas: 1
+
+  repoServer:
+    replicas: 2
+
+  applicationSet:
+    replicas: 2

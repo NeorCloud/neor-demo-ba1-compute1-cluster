@@ -1,0 +1,9 @@
+apiVersion: v2
+name: "argocd-ba1"
+description: "Installed chart for argocd of ba1 cluster"
+type: application
+version: 0.1.0
+dependencies:
+  - name: argo-cd
+    version: 5.x
+    repository: "https://argoproj.github.io/argo-helm"

@@ -1,0 +1,11 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    {{- .Values.prometheusRule.labels | toYaml | nindent 4 }}
+  name: calico-felix
+spec:
+  groups:
+  - name: calico.rules
+    rules:
+    {{- .Values.prometheusRule.rules | toYaml | nindent 6 }}

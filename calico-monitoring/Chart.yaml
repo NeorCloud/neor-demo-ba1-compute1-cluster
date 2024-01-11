@@ -1,0 +1,5 @@
+apiVersion: v2
+name: "calico-monitoring"
+description: "Monitoring Calico using Prometheus Operator"
+version: 1.0.0
+appVersion: 2.10.1

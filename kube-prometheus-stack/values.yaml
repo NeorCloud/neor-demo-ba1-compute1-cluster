@@ -1,0 +1,516 @@
+kube-prometheus-stack:
+  ## Provide custom recording or alerting rules to be deployed into the cluster.
+  ##
+  additionalPrometheusRulesMap: {}
+  #  rule-name:
+  #    groups:
+  #    - name: my_group
+  #      rules:
+  #      - record: my_record
+  #        expr: 100 * my_record
+
+  ##
+  global:
+    ## Global image registry to use if it needs to be overriden for some specific use cases (e.g local registries, custom images, ...)
+    ##
+    imageRegistry: ""
+
+    ## Reference to one or more secrets to be used when pulling images
+    ## ref: https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/
+    ##
+    imagePullSecrets: []
+    # - name: "image-pull-secret"
+    # or
+    # - "image-pull-secret"
+
+  ## Configuration for alertmanager
+  ## ref: https://prometheus.io/docs/alerting/alertmanager/
+  ##
+  alertmanager:
+    ## Alertmanager configuration directives
+    ## ref: https://prometheus.io/docs/alerting/configuration/#configuration-file
+    ##      https://prometheus.io/webtools/alerting/routing-tree-editor/
+    ##
+    config:
+      global:
+        resolve_timeout: 5m
+      inhibit_rules:
+      - source_matchers:
+        - 'severity = critical'
+        target_matchers:
+        - 'severity =~ warning|info'
+        equal:
+        - 'namespace'
+        - 'alertname'
+      - source_matchers:
+        - 'severity = warning'
+        target_matchers:
+        - 'severity = info'
+        equal:
+        - 'namespace'
+        - 'alertname'
+      - source_matchers:
+        - 'alertname = InfoInhibitor'
+        target_matchers:
+        - 'severity = info'
+        equal:
+        - 'namespace'
+      route:
+        group_by: ['namespace']
+        group_wait: 30s
+        group_interval: 5m
+        repeat_interval: 12h
+        receiver: 'telegram-alerts-bot'
+        routes:
+        - receiver: 'null'
+          matchers:
+          - alertname =~ "InfoInhibitor|Watchdog"
+      receivers:
+      - name: 'null'
+      - name: 'telegram-alerts-bot'
+        telegram_configs:
+        - bot_token: ""
+          api_url: https://api.telegram.org
+          chat_id: ""
+          parse_mode: 'HTML'
+          message: '{{ template "telegram.neor.message" . }}'
+          http_config:
+            proxy_url: ''
+      templates:
+      - '/etc/alertmanager/config/*.tmpl'
+
+    ## Alertmanager configuration directives (as string type, preferred over the config hash map)
+    ## stringConfig will be used only, if tplConfig is true
+    ## ref: https://prometheus.io/docs/alerting/configuration/#configuration-file
+    ##      https://prometheus.io/webtools/alerting/routing-tree-editor/
+    ##
+    stringConfig: ""
+
+    ## Pass the Alertmanager configuration directives through Helm's templating
+    ## engine. If the Alertmanager configuration contains Alertmanager templates,
+    ## they'll need to be properly escaped so that they are not interpreted by
+    ## Helm
+    ## ref: https://helm.sh/docs/developing_charts/#using-the-tpl-function
+    ##      https://prometheus.io/docs/alerting/configuration/#tmpl_string
+    ##      https://prometheus.io/docs/alerting/notifications/
+    ##      https://prometheus.io/docs/alerting/notification_examples/
+    tplConfig: false
+
+    ## Alertmanager template files to format alerts
+    ## By default, templateFiles are placed in /etc/alertmanager/config/ and if
+    ## they have a .tmpl file suffix will be loaded. See config.templates above
+    ## to change, add other suffixes. If adding other suffixes, be sure to update
+    ## config.templates above to include those suffixes.
+    ## ref: https://prometheus.io/docs/alerting/notifications/
+    ##      https://prometheus.io/docs/alerting/notification_examples/
+    ##
+    templateFiles:
+    #
+    ## An example template:
+    #   template_1.tmpl: |-
+    #       {{ define "cluster" }}{{ .ExternalURL | reReplaceAll ".*alertmanager\\.(.*)" "$1" }}{{ end }}
+    #
+    #       {{ define "slack.myorg.text" }}
+    #       {{- $root := . -}}
+    #       {{ range .Alerts }}
+    #         *Alert:* {{ .Annotations.summary }} - `{{ .Labels.severity }}`
+    #         *Cluster:* {{ template "cluster" $root }}
+    #         *Description:* {{ .Annotations.description }}
+    #         *Graph:* <{{ .GeneratorURL }}|:chart_with_upwards_trend:>
+    #         *Runbook:* <{{ .Annotations.runbook }}|:spiral_note_pad:>
+    #         *Details:*
+    #           {{ range .Labels.SortedPairs }} - *{{ .Name }}:* `{{ .Value }}`
+    #           {{ end }}
+    #       {{ end }}
+    #       {{ end }}
+      telegram_template.tmpl: |-
+        {{ define "cluster" }}{{ .ExternalURL | reReplaceAll ".*alertmanager\\.(.*)" "$1" }}{{ end }}
+
+        {{ define "labels"}}
+        🏷 Labels:
+        {{- range .Labels.SortedPairs }}
+        {{- if and (ne .Name "severity") (ne .Name "namespace") (ne .Name "alertname") (ne .Name "prometheus") (ne .Name "metrics_path") (ne .Name "endpoint") }}
+        <i>{{ .Name }}</i>: <code>{{ .Value }}</code>
+        {{- end }}
+        {{- end -}}
+        {{ end }}
+
+        {{ define "info_alert" }}
+        ℹ️ <a href="{{ .GeneratorURL }}"><b>{{ .Labels.alertname }}</b></a> - <code>{{ .Labels.severity }}</code>
+        {{ end }}
+
+        {{ define "warning_alert" }}
+        ⚠️ <a href="{{ .GeneratorURL }}"><b>{{ .Labels.alertname }}</b></a> - <code>{{ .Labels.severity }}</code>
+        {{- if .Annotations.summary }}
+        📝 {{ .Annotations.summary }}
+        {{- end }}
+        {{- template "labels" . -}}
+        {{- if .Annotations.runbook_url }}
+        📚 <a href="{{ .Annotations.runbook_url }}">Runbook</a>
+        {{- end -}}
+        {{ end }}
+
+        {{ define "critical_alert" }}
+        ❗️ <a href="{{ .GeneratorURL }}"><b>{{ .Labels.alertname }}</b></a> - <code>{{ .Labels.severity }}</code>
+        {{- if .Annotations.summary }}
+        📝 {{ .Annotations.summary }}
+        {{- end }}
+        {{- if .Annotations.description }}
+        📖 {{ .Annotations.description }}
+        {{- end }}
+        {{- template "labels" . -}}
+        {{- if .Annotations.runbook_url }}
+        📚 <a href="{{ .Annotations.runbook_url }}">Runbook</a>
+        {{- end }}
+        {{ end }}
+
+        {{ define "__text_alert_list" }}
+        {{- range . }}
+        ---
+        {{- if eq .Labels.severity "info" }}
+        {{- template "info_alert" . -}}
+        {{- else if eq .Labels.severity "warning" }}
+        {{- template "warning_alert" . -}}
+        {{- else if eq .Labels.severity "critical" }}
+        {{- template "critical_alert" . -}}
+        {{- else }}
+        {{- template "info_alert" . -}}
+        {{- end }}
+        {{ end }}
+        {{- end -}}
+
+        {{ define "telegram.neor.message" }}
+        🏢 cluster: {{ template "cluster" . }}
+        {{- if and .GroupLabels .GroupLabels.namespace }}
+        🗂 namespcase: {{ .GroupLabels.namespace }}
+        {{- else }}
+        🗂 Cluster Wide Alert
+        {{ end }}
+        {{ if gt (len .Alerts.Firing) 0 }}
+        🔥 Alerts Firing 🔥
+        {{- template "__text_alert_list" .Alerts.Firing }}
+        {{- end }}
+        {{- if gt (len .Alerts.Resolved) 0 }}
+        ✅ Alerts Resolved ✅
+        {{- template "__text_alert_list" .Alerts.Resolved }}
+        {{- end }}
+        🛠
+        💊 <a href="https://grafana.ba1.exchange.neor.space">Grafana</a>
+        💊 <a href="https://alertmanager.ba1.exchange.neor.space">Alertmanager</a>
+        💊 <a href="https://prometheus.ba1.exchange.neor.space">Prometheus</a>
+        🛠
+        {{ end }}
+
+
+    ingress:
+      enabled: true
+      ingressClassName: kong
+      annotations:
+        cert-manager.io/cluster-issuer: letsencrypt-prd
+      hosts:
+      - alertmanager.ba1.exchange.neor.space
+      tls:
+      - secretName: alertmanager-general-tls
+        hosts:
+        - alertmanager.ba1.exchange.neor.space
+
+    ## Settings affecting alertmanagerSpec
+    ## ref: https://github.com/prometheus-operator/prometheus-operator/blob/main/Documentation/api.md#alertmanagerspec
+    ##
+    alertmanagerSpec:
+      ## AlertmanagerConfigs to be selected to merge and configure Alertmanager with.
+      ##
+      alertmanagerConfigSelector: {}
+      ## Example which selects all alertmanagerConfig resources
+      ## with label "alertconfig" with values any of "example-config" or "example-config-2"
+      # alertmanagerConfigSelector:
+      #   matchExpressions:
+      #     - key: alertconfig
+      #       operator: In
+      #       values:
+      #         - example-config
+      #         - example-config-2
+      #
+      ## Example which selects all alertmanagerConfig resources with label "role" set to "example-config"
+      # alertmanagerConfigSelector:
+      #   matchLabels:
+      #     role: example-config
+
+      ## Namespaces to be selected for AlertmanagerConfig discovery. If nil, only check own namespace.
+      ##
+      alertmanagerConfigNamespaceSelector: {}
+      ## Example which selects all namespaces
+      ## with label "alertmanagerconfig" with values any of "example-namespace" or "example-namespace-2"
+      # alertmanagerConfigNamespaceSelector:
+      #   matchExpressions:
+      #     - key: alertmanagerconfig
+      #       operator: In
+      #       values:
+      #         - example-namespace
+      #         - example-namespace-2
+
+      ## Example which selects all namespaces with label "alertmanagerconfig" set to "enabled"
+      # alertmanagerConfigNamespaceSelector:
+      #   matchLabels:
+      #     alertmanagerconfig: enabled
+
+      ## AlermanagerConfig to be used as top level configuration
+      ##
+      alertmanagerConfiguration: {}
+      ## Example with select a global alertmanagerconfig
+      # alertmanagerConfiguration:
+      #   name: global-alertmanager-Configuration
+
+      ## Defines the strategy used by AlertmanagerConfig objects to match alerts. eg:
+      ##
+      alertmanagerConfigMatcherStrategy: {}
+      ## Example with use OnNamespace strategy
+      # alertmanagerConfigMatcherStrategy:
+      #   type: OnNamespace
+
+      ## Storage is the definition of how storage will be used by the Alertmanager instances.
+      ## ref: https://github.com/prometheus-operator/prometheus-operator/blob/main/Documentation/user-guides/storage.md
+      ##
+      storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: topolvm-provisioner
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 5Gi
+          selector: {}
+
+
+      ## The external URL the Alertmanager instances will be available under. This is necessary to generate correct URLs. This is necessary if Alertmanager is not served from root of a DNS name. string  false
+      ##
+      externalUrl: https://alertmanager.ba1.exchange.neor.space
+
+      ## The route prefix Alertmanager registers HTTP handlers for. This is useful, if using ExternalURL and a proxy is rewriting HTTP routes of a request, and the actual ExternalURL is still true,
+      ## but the server serves requests under a different route prefix. For example for use with kubectl proxy.
+      ##
+      routePrefix: /
+
+      ## Define resources requests and limits for single Pods.
+      ## ref: https://kubernetes.io/docs/user-guide/compute-resources/
+      ##
+      resources: {}
+      # requests:
+      #   memory: 400Mi
+
+      ## ListenLocal makes the Alertmanager server listen on loopback, so that it does not bind against the Pod IP.
+      ## Note this is only for the Alertmanager UI, not the gossip communication.
+      ##
+      listenLocal: false
+
+  ## Using default values from https://github.com/grafana/helm-charts/blob/main/charts/grafana/values.yaml
+  ##
+  grafana:
+    enabled: true
+    namespaceOverride: ""
+
+    ## ForceDeployDatasources Create datasource configmap even if grafana deployment has been disabled
+    ##
+    forceDeployDatasources: false
+
+    ## ForceDeployDashboard Create dashboard configmap even if grafana deployment has been disabled
+    ##
+    forceDeployDashboards: false
+
+    ## Deploy default dashboards
+    ##
+    defaultDashboardsEnabled: true
+
+    ## Timezone for the default dashboards
+    ## Other options are: browser or a specific timezone, i.e. Europe/Luxembourg
+    ##
+    defaultDashboardsTimezone: Asia/Tehran
+
+    adminPassword: samplePass
+
+    ingress:
+      enabled: true
+      ingressClassName: kong
+      annotations:
+        cert-manager.io/cluster-issuer: letsencrypt-prd
+
+      hosts:
+      - grafana.ba1.exchange.neor.space
+
+      tls:
+      - secretName: grafana-general-tls
+        hosts:
+        - grafana.ba1.exchange.neor.space
+
+    sidecar:
+      dashboards:
+        enabled: true
+        label: grafana_dashboard
+        labelValue: "1"
+        # Allow discovery in all namespaces for dashboards
+        searchNamespace: ALL
+
+        ## Annotations for Grafana dashboard configmaps
+        ##
+        annotations: {}
+        multicluster:
+          global:
+            enabled: false
+          etcd:
+            enabled: false
+        provider:
+          allowUiUpdates: false
+      datasources:
+        enabled: true
+        defaultDatasourceEnabled: true
+        isDefaultDatasource: true
+
+        uid: prometheus
+
+        ## URL of prometheus datasource
+        ##
+        # url: http://prometheus-stack-prometheus:9090/
+
+        ## Set method for HTTP to send query to datasource
+        httpMethod: POST
+
+    ## Configure additional grafana datasources (passed through tpl)
+    ## ref: http://docs.grafana.org/administration/provisioning/#datasources
+    additionalDataSources: []
+    # - name: prometheus-sample
+    #   access: proxy
+    #   basicAuth: true
+    #   basicAuthPassword: pass
+    #   basicAuthUser: daco
+    #   editable: false
+    #   jsonData:
+    #       tlsSkipVerify: true
+    #   orgId: 1
+    #   type: prometheus
+    #   url: https://{{ printf "%s-prometheus.svc" .Release.Name }}:9090
+    #   version: 1
+
+  ## Manages Prometheus and Alertmanager components
+  ##
+  prometheusOperator:
+    enabled: true
+
+    ## The clusterDomain value will be added to the cluster.peer option of the alertmanager.
+    ## Without this specified option cluster.peer will have value alertmanager-monitoring-alertmanager-0.alertmanager-operated:9094 (default value)
+    ## With this specified option cluster.peer will have value alertmanager-monitoring-alertmanager-0.alertmanager-operated.namespace.svc.cluster-domain:9094
+    ##
+    clusterDomain: "k8s.ba1.exchange.neor.space"
+
+    ## Resource limits & requests
+    ##
+    resources: {}
+    # limits:
+    #   cpu: 200m
+    #   memory: 200Mi
+    # requests:
+    #   cpu: 100m
+   
+  ## Deploy a Prometheus instance
+  ##
+  prometheus:
+    enabled: true
+    # Service for thanos service discovery on sidecar
+    # Enable this can make Thanos Query can use
+    # `--store=dnssrv+_grpc._tcp.${kube-prometheus-stack.fullname}-thanos-discovery.${namespace}.svc.cluster.local` to discovery
+    # Thanos sidecar on prometheus nodes
+    # (Please remember to change ${kube-prometheus-stack.fullname} and ${namespace}. Not just copy and paste!)
+    thanosService:
+      enabled: true
+
+    # ServiceMonitor to scrape Sidecar metrics
+    # Needs thanosService to be enabled as well
+    thanosServiceMonitor:
+      enabled: true
+
+    # Ingress exposes thanos sidecar outside the cluster
+    thanosIngress:
+      enabled: false
+
+    ingress:
+      enabled: true
+      ingressClassName: kong
+
+      annotations:
+        cert-manager.io/cluster-issuer: letsencrypt-prd
+      
+      hosts:
+      - prometheus.ba1.exchange.neor.space
+
+      ## Paths to use for ingress rules - one path should match the prometheusSpec.routePrefix
+      ##
+      paths:
+      - /
+      pathType: ImplementationSpecific
+      tls:
+      - secretName: prometheus-general-tls
+        hosts:
+        - prometheus.ba1.exchange.neor.space
+
+    ## Settings affecting prometheusSpec
+    ## ref: https://github.com/prometheus-operator/prometheus-operator/blob/main/Documentation/api.md#prometheusspec
+    ##
+    prometheusSpec:
+      ## External URL at which Prometheus will be reachable.
+      ##
+      externalUrl: "https://prometheus.ba1.exchange.neor.space"
+
+      ## Resource limits & requests
+      ##
+      resources: {}
+      # requests:
+      #   memory: 400Mi
+
+      ## Prometheus StorageSpec for persistent data
+      ## ref: https://github.com/prometheus-operator/prometheus-operator/blob/main/Documentation/user-guides/storage.md
+      ##
+      storageSpec:
+       volumeClaimTemplate:
+         spec:
+           storageClassName: topolvm-provisioner
+           accessModes: ["ReadWriteOnce"]
+           resources:
+             requests:
+               storage: 15Gi
+      volumes:
+      - name: etcd-client-certs
+        secret:
+          secretName: etcd-certs
+      volumeMounts:
+      - name: etcd-client-certs
+        mountPath: /etc/prometheus/secrets/etcd-client-cert
+        readOnly: true
+
+  thanosRuler:
+    enabled: true
+
+  ## Setting to true produces cleaner resource names, but requires a data migration because the name of the persistent volume changes. Therefore this should only be set once on initial installation.
+  ##
+  cleanPrometheusOperatorObjectNames: true
+
+  kubeEtcd:
+    enabled: true
+    ## Configure secure access to the etcd cluster by loading a secret into prometheus and
+    ## specifying security configuration below. For example, with a secret named etcd-client-cert
+    ##
+    ## serviceMonitor:
+    ##   scheme: https
+    ##   insecureSkipVerify: false
+    ##   serverName: localhost
+    ##   caFile: /etc/prometheus/secrets/etcd-client-cert/etcd-ca
+    ##   certFile: /etc/prometheus/secrets/etcd-client-cert/etcd-client
+    ##   keyFile: /etc/prometheus/secrets/etcd-client-cert/etcd-client-key
+    ##
+    serviceMonitor:
+      enabled: true
+      
+      scheme: http
+      insecureSkipVerify: false
+      serverName: "localhost"
+      caFile: /etc/prometheus/secrets/etcd-client-cert/ca.crt
+      certFile: /etc/prometheus/secrets/etcd-client-cert/client.crt
+      keyFile: /etc/prometheus/secrets/etcd-client-cert/client.key

@@ -1,0 +1,9 @@
+apiVersion: v2
+name: logs-collection
+description: Logs Collection
+version: 0.1.0
+type: application
+dependencies:
+  - name: eck-stack
+    version: 0.8.0
+    repository: https://helm.elastic.co

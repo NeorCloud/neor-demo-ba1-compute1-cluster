@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kubescape-operator
+  namespace: argocd
+spec:
+  destination:
+    namespace: kubescape-operator
+    server: "https://kubernetes.default.svc"
+  project: default
+  source:
+    path: kubescape-operator
+    repoURL: https://github.com/NeorCloud/neor-demo-ba1-compute1-cluster.git
+    targetRevision: main
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+    - Validate=false
+    - Prune=true
+    - SelfHeal=true
